@@ -1,0 +1,205 @@
+
+```{r}
+
+library(ggplot2);library(data.table);library(brms); library(rstan); library(brmstools);library(rethinking);library(bayesplot);library(ggplot2); library(cowplot);library(gridExtra);library(grid)
+
+df = read.csv("firstrealrun.csv", header = TRUE) 
+
+
+
+#loney turtles predicted by flock = less lonely if flockbehaviour
+boxplot(her$count.turtles.with..lonely....true. ~ her$flock.behavior)
+
+#lonely turtles predicted by movement decrease = more loneley if movement decrase
+boxplot(her$count.turtles.with..lonely....true. ~ her$movement.decrease)
+
+#lonely turtles predicted by movement decrease ONLY when flockbehaviour is OFF 
+#= more sure about the relationship between lonely turtles and movement decrease (more lonely if movement decrease)
+boxplot(her$count.turtles.with..lonely....true.[her$flock.behavior == "false"] ~ her$movement.decrease[her$flock.behavior == "false"])
+
+#with flocking true 
+# ALOT less lonely when not movement decrease
+boxplot(her$count.turtles.with..lonely....true.[her$flock.behavior == "true"] ~ her$movement.decrease[her$flock.behavior == "true"])
+
+```
+
+lineplots
+
+```{r}
+
+#line
+
+line_flock = ggplot(df, aes(flock.behavior, lonely.turtles, color = movement.decrease, group = movement.decrease))+
+  geom_point(stat = "summary", fun.y=mean)+
+  stat_summary(fun.y=mean, geom="line", aes(group = movement.decrease))+  
+  geom_errorbar(stat="summary", fun.data= mean_se, width=0.1)
+line_flock
+
+line.move = ggplot(df, aes(movement.decrease, lonely.turtles, color = flock.behavior, group = flock.behavior ))+
+  geom_point(stat = "summary", fun.y=mean)+
+  stat_summary(fun.y=mean, geom="line", aes(group = flock.behavior))+  
+  geom_errorbar(stat="summary", fun.data= mean_se, width=0.1)
+line.move
+
+
+
+```
+cleaning a bit 
+
+
+```{r}
+
+setnames(df, "X.run.number.", "run.number")
+setnames(df, "count.turtles.with..friends.score...0.", "nofriends")
+setnames(df, "X.run.number.", "run.number")
+setnames(df, "count.turtles.with..lonely....true." , "lonely.turtles")
+setnames(df, "mean..link.weight..of.turtles", "mean.linkweight")
+setnames(df, "mean..friends.score..of.turtles", "mean.friendscore")
+setnames(df, "standard.deviation..link.weight..of.turtles",  "sd.linkweight")
+setnames(df, "standard.deviation..friends.score..of.turtles", "sd.friendscore")
+
+```
+
+
+models
+
+
+```{r}
+
+
+#______________________________ nolinks __________________________________
+
+m_flock_nofriends = brm( nofriends ~ flock.behavior, family = poisson(link = "log"), data = df, cores = 2, iter = 10000, chain = 2)
+stanplot(m_flock_nofriends) #strong effects - not crossing 0 
+m_flock_nofriends
+
+m_decrease_nofriends = brm(nofriends ~ movement.decrease, data = df, family = poisson(), cores = 2, iter = 10000, chain = 2)
+stanplot(m_decrease_nofriends)
+m_decrease_nofriends
+
+m_both_nolinks = brm(nofriends ~ flock.behavior + movement.decrease, family = poisson(), data = df, cores = 2, iter = 10000, chain = 2)
+stanplot(m_both_nolinks)
+m_both_nolinks
+
+m_interaction_nolinks = brm( nofriends ~ flock.behavior * movement.decrease, family = poisson(), data = df, cores = 2, iter = 10000, chain = 2)
+stanplot(m_interaction)
+m_interaction
+
+#______________________________ lonely __________________________________
+
+
+m_flock_lonely = brm(lonely.turtles ~ flock.behavior, data = df, family = poisson(), cores = 2, iter = 10000, chain = 2)
+stanplot(m_flock_lonely)
+m_flock_lonely
+
+
+m_decrease_lonely = brm(lonely.turtles ~ movement.decrease, family = poisson(), data = df, cores = 2, iter = 10000, chain = 2)
+stanplot(m_decrease_lonely)
+m_decrease_lonely
+
+m_both_lonely = brm(lonely.turtles ~ flock.behavior + movement.decrease, family = poisson(), data = df, cores = 2, iter = 10000, chain = 2)
+stanplot(m_flock_lonely)
+
+m_interaction_lonely = brm(lonely.turtles ~ flock.behavior * movement.decrease, family = poisson(), data = df, cores = 2, iter = 10000, chain = 2)
+stanplot(m_flock_lonely)
+
+
+#______________________________ submodels __________________________________
+
+m_sd_linkweight = brm(sd.linkweight ~ flock.behavior, family = gaussian(), data = df, cores = 2, iter = 1000, chain = 2) #family???
+stanplot(m_sd_linkweight)
+m_sd_linkweight
+
+m_sd_friendscore = brm(sd.friendscore ~ flock.behavior, data = df, cores = 2, iter = 10000, chain = 2) #family??
+stanplot(m_sd_friendscore)
+m_sd_friendscore
+
+```
+information criteria
+
+```{r}
+WAIC_flock_nofriends = brms::WAIC(m_flock_nofriends)
+WAIC_decrease_nofriends = brms::WAIC(m_decrease_nofriends)
+WAIC_both_nofriends = brms::WAIC(m_both_nolinks)
+WAIC_interaction_nofriends = brms::WAIC(m_interaction_nolinks)
+
+compare_ic(WAIC_flock_nofriends, WAIC_decrease_nofriends, WAIC_both_nofriends, WAIC_interaction_nofriends)
+
+?compare_ic()
+
+```
+
+priors and posteriors 
+
+
+```{r}
+plot(marginal_effects(m_flock_nofriends), ask = FALSE)
+
+
+#making a model with conservative prior to test if it will change the posterior
+
+
+
+## get all parameters and parameters classes to define priors on
+summary(m_flock_nofriends)
+ get_prior(nofriends ~ flock.behavior, 
+          data = df, family = poisson )
+        
+
+#difine new prior
+prior <- c(prior(normal(0,0.5), class = "b"), #prior for beta
+prior(normal(0,10), class = "Intercept"))
+
+
+test = brm(nofriends ~ flock.behavior, family = poisson(),data = df, prior = prior , cores = 2, iter = 10000, chain = 2)
+summary(test, prior = TRUE)
+
+#estract samples from posterior
+post = posterior_samples(m_flock_nofriends)
+post.test = posterior_samples(test)
+
+#weakly informative prior
+color_scheme_set("pink")
+mcmc_dens(post)
+
+#dens new prior
+color_scheme_set("viridis")
+mcmc_dens(post.test)
+
+#or just plot posteiors maybe??
+weakly_informed_prior = plot(m_flock_nofriends)
+new_prior = plot(test)
+
+
+
+```
+
+
+
+
+pp-checks
+
+```{r}
+#using bayesplot for pp checks
+
+#for no links
+pp_check(m_flock_nofriends, nsamples = 100) + labs(title = "pp_check - nolinks ~ flockbehavior ")
+pp_check(m_decrease_nofriends, nsamples = 100) + labs(title = "pp_check - nolinks ~ movedecrease ~ nolinks")
+pp_check(m_both_nolinks, nsamples = 100) + labs(title = "pp_check - nolinks ~ flockbehavior + movedecrease")
+pp_check(m_interaction_nolinks, nsamples = 100) + labs(title = "pp_check -nolinks ~ flockbehavior * movedecrease")
+
+#for lonely
+pp_check(m_flock_lonely, nsamples = 100) + labs(title = "pp_check - weaklinks ~ flockbehavior")
+pp_check(m_decrease_lonely, nsamples = 100) + labs(title = "weaklinks ~ movedecrease")
+pp_check(m_both_lonely, nsamples = 100) + labs(title = "pp_check - weaklinks ~ flockbehavior + movedecrease")
+pp_check(m_interaction_lonely, nsamples = 100) + labs(title = "pp_check - weaklinks ~ flockbehavior * movedecrease")
+
+
+
+hist(df$nofriends)
+
+
+
+
+```
+
